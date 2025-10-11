@@ -1,2 +1,4 @@
 typer[all]
 beautifulsoup4
+
+pytest>=7.0.0
