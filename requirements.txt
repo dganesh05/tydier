@@ -2,5 +2,7 @@ typer[all]
 beautifulsoup4
 sentence_transformers
 scikit-learn
+groq
+dotenv
 
 pytest>=7.0.0

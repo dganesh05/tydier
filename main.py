@@ -1,3 +1,10 @@
+"""
+Future Ideas:
+- Add a way for Groq to compare all folder headers to make them distinct
+"""
+
+
+
 import pathlib
 from typing import List, Tuple
 import bs4
@@ -5,9 +12,20 @@ import html
 import typer
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import AgglomerativeClustering
+import os
+import dotenv
+from groq import Groq
+
+dotenv.load_dotenv()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 model = SentenceTransformer("all-MiniLM-L6-v2")
 app = typer.Typer(name="Tydier")
+client = Groq(api_key=GROQ_API_KEY)
+groq_model = "llama-3.1-8b-instant"
+
+
+N_CLUSTERS = 10
 
 
 def extract_bookmarks(soup: bs4.BeautifulSoup) -> List[Tuple[str, str]]:
@@ -50,11 +68,11 @@ def write_bookmarks_netscape(output_path: pathlib.Path, bookmarks: List[Tuple[st
             f.write(f"    <DT><A HREF=\"{esc_href}\">{esc_title}</A>\n")
         f.write(footer)
 
-
-def write_clustered_bookmarks_netscape(output_path: pathlib.Path, clusters: List[List[Tuple[str, str]]]) -> None:
+def write_clustered_bookmarks_netscape(output_path: pathlib.Path, clusters: List[List[Tuple[str, str]]], folder_names: List[str] = None) -> None:
     """Write clustered bookmarks in the common Netscape bookmarks HTML format.
 
     clusters: list of clusters, where each cluster is a list of (title, href) tuples.
+    folder_names: optional list of folder names for each cluster.
     """
     header = """<!DOCTYPE NETSCAPE-Bookmark-file-1>
         <META HTTP-EQUIV=Content-Type CONTENT=\"text/html; charset=UTF-8\">
@@ -67,10 +85,16 @@ def write_clustered_bookmarks_netscape(output_path: pathlib.Path, clusters: List
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as f:
         f.write(header)
+        folder_index = 0
         for i, cluster in enumerate(clusters):
             if cluster:  # Only write non-empty clusters
-                # Write cluster header
-                f.write(f"    <DT><H3>Cluster {i+1} ({len(cluster)} bookmarks)</H3>\n")
+                # Write cluster header with folder name if available
+                if folder_names and folder_index < len(folder_names):
+                    cluster_title = html.escape(folder_names[folder_index])
+                    f.write(f"    <DT><H3>{cluster_title} ({len(cluster)} bookmarks)</H3>\n")
+                    folder_index += 1
+                else:
+                    f.write(f"    <DT><H3>Cluster {i+1} ({len(cluster)} bookmarks)</H3>\n")
                 f.write("    <DL><p>\n")
                 
                 # Write bookmarks in this cluster
@@ -107,6 +131,31 @@ def cluster_bookmarks(embedded_bookmarks: List[Tuple[str, List[float], str]], n_
     
     # Filter out empty clusters
     return [cluster for cluster in clusters if cluster]
+
+def get_folder_name(titles: List[str]) -> str:
+    """Get a folder name for a bookmark title."""
+    if not client:
+        typer.secho("Warning: GROQ_API_KEY not set, using default folder names", fg=typer.colors.YELLOW)
+        return f"Cluster {len(titles)} Bookmarks"
+    
+    try:
+        # Limit titles to avoid token limits
+        limited_titles = titles[:10]  # Only use first 10 titles
+        prompt = f"Generate a concise folder name (2-4 words) for bookmarks with these titles: {limited_titles}. Return only the folder name, no explanation."
+        
+        response = client.chat.completions.create(
+            model=groq_model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=20,
+            temperature=0.3
+        )
+        folder_name = response.choices[0].message.content.strip()
+        # Clean up the response (remove quotes, extra text)
+        folder_name = folder_name.strip('"').strip("'").strip()
+        return folder_name
+    except Exception as e:
+        typer.secho(f"Warning: Failed to get folder name from Groq: {e}", fg=typer.colors.YELLOW)
+        return f"Cluster {len(titles)} Bookmarks"
 
 
 @app.command()
@@ -154,9 +203,17 @@ def process(
             if len(cluster) > 3:
                 typer.secho(f"    ... and {len(cluster) - 3} more", fg=typer.colors.WHITE)
 
+    # Get a folder name for each cluster
+    folder_names = []
+    for i, cluster in enumerate(clusters):
+        if cluster:
+            folder_name = get_folder_name([title for title, href in cluster])
+            typer.secho(f"  Cluster {i+1} folder name: {folder_name}", fg=typer.colors.CYAN)
+            folder_names.append(folder_name)
+
     # Write the clustered bookmarks in Netscape bookmark HTML format.
     try:
-        write_clustered_bookmarks_netscape(out_path, clusters)
+        write_clustered_bookmarks_netscape(out_path, clusters, folder_names)
         typer.secho(f"Clustered bookmarks written to {out_path}", fg=typer.colors.BLUE)
     except Exception as exc:
         typer.secho(f"Failed to write output file: {exc}", fg=typer.colors.RED)
