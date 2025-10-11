@@ -1,4 +1,6 @@
 typer[all]
 beautifulsoup4
+sentence_transformers
+scikit-learn
 
 pytest>=7.0.0

@@ -8,7 +8,7 @@ import bs4
 proj_root = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(proj_root))
 
-from main import extract_bookmarks, write_bookmarks_netscape
+from main import extract_bookmarks, write_bookmarks_netscape, embed_bookmarks, cluster_bookmarks
 
 
 def test_extract_and_write(tmp_path: pathlib.Path):
@@ -40,3 +40,52 @@ def test_extract_and_write(tmp_path: pathlib.Path):
     text = out.read_text(encoding="utf-8")
     assert "https://cdn.openai.com/business-guides-and-resources/a-practical-guide-to-building-agents.pdf" in text
     assert "FounderSignal" in text
+
+
+def test_embed_bookmarks():
+    """Test the embedding functionality."""
+    bookmarks = [
+        ("Python Programming", "https://python.org"),
+        ("GitHub Repository", "https://github.com"),
+        ("Stack Overflow", "https://stackoverflow.com")
+    ]
+    
+    embedded = embed_bookmarks(bookmarks)
+    
+    # Check that we get the right number of embeddings
+    assert len(embedded) == 3
+    
+    # Check that each embedding has the right structure: (title, embedding, href)
+    for title, embedding, href in embedded:
+        assert isinstance(title, str)
+        assert isinstance(embedding, list)
+        assert isinstance(href, str)
+        assert len(embedding) > 0  # Embedding should be a non-empty list of floats
+
+
+def test_cluster_bookmarks():
+    """Test the clustering functionality."""
+    # Create some embedded bookmarks
+    bookmarks = [
+        ("Python Programming", "https://python.org"),
+        ("Python Documentation", "https://docs.python.org"),
+        ("GitHub Repository", "https://github.com"),
+        ("Stack Overflow", "https://stackoverflow.com")
+    ]
+    
+    embedded = embed_bookmarks(bookmarks)
+    clusters = cluster_bookmarks(embedded, n_clusters=2)
+    
+    # Check that we get clusters
+    assert len(clusters) > 0
+    
+    # Check that all bookmarks are in clusters
+    total_bookmarks_in_clusters = sum(len(cluster) for cluster in clusters)
+    assert total_bookmarks_in_clusters == len(bookmarks)
+    
+    # Check that each cluster contains (title, href) tuples
+    for cluster in clusters:
+        assert len(cluster) > 0
+        for title, href in cluster:
+            assert isinstance(title, str)
+            assert isinstance(href, str)
